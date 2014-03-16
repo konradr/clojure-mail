@@ -49,25 +49,15 @@
    :sent  "[Gmail]/Sent Mail"
    :spam  "[Gmail]/Spam"})
 
+;; Mail store
+;; *******************************************************
+
 (defn as-properties
   [m]
   (let [p (Properties.)]
     (doseq [[k v] m]
       (.setProperty p (str k) (str v)))
         p))
-
-(defn file->message
-  "read a downloaded mail message in the same format
-   as you would find on the mail server. This can
-   be used to read saved messages from text files
-   and for parsing fixtures in tests etc"
-  [path-to-message]
-  (let [props (Session/getDefaultInstance (Properties.))
-        msg (FileInputStream. (File. path-to-message))]
-    (MimeMessage. props msg)))
-
-;; Mail store
-;; *******************************************************
 
 (defn store
   "A store models a message store and its access protocol,
@@ -339,12 +329,35 @@
          (doall (map #(.setFlags % (Flags. Flags$Flag/SEEN) true) messages))
         nil)))
 
-(defn dump
+
+;; Saving / reading messages to filesystem
+;; *********************************************************
+
+(defn write-msg-to-dir
+  "Write one message to a file in dir. Filename will look like:
+
+  <e1878b88-e02e-4750-b4a4-357cbd4ad0fb@xtinp2mta143.xt.local>
+
+  These message files can be read by read-mail-from-file"
+  [dir msg]
+  (.writeTo msg (java.io.FileOutputStream.
+                 (format "%s%s" dir (str (message-id msg))))))
+
+(defn save-msgs-to-dir
   "Handy function that dumps out a batch of emails to disk"
   [dir msgs]
   (doseq [msg msgs]
-    (.writeTo msg (java.io.FileOutputStream.
-      (format "%s%s" dir (str (message-id msg)))))))
+    (write-msg-to-dir dir msg)))
+
+(defn read-mail-from-file
+  "read a downloaded mail message in the same format
+   as you would find on the mail server. This can
+   be used to read saved messages from text files
+   and for parsing fixtures in tests etc"
+  [path-to-message]
+  (let [props (Session/getDefaultInstance (Properties.))
+        msg (FileInputStream. (File. path-to-message))]
+    (MimeMessage. props msg)))
 
 ;; Public API
 ;; *********************************************************
