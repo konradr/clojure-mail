@@ -103,16 +103,6 @@
   ([^com.sun.mail.imap.IMAPStore s name]
      (.getFolder s name)))
 
-(defn all-messages
-  "Given a store and folder returns all messages
-   reversed so the newest messages come first"
-  ([folder] (all-messages *store* folder))
-  ([^com.sun.mail.imap.IMAPStore store folder]
-     (let [s (.getDefaultFolder store)
-           inbox (.getFolder s folder)
-           folder (doto inbox (.open Folder/READ_ONLY))]
-       (->> (.getMessages folder)
-            reverse))))
 
 ;; Message parser
 ;; *********************************************************
@@ -182,6 +172,10 @@
   (let [f (flags message)]
     (boolean
       (.contains f flag))))
+
+(defn user-flags [message]
+  (let [flags (flags message)]
+    (.getUserFlags flags)))
 
 (defn read?
   "Checks if this message has been read"
@@ -319,9 +313,14 @@
      (let [folder (open-folder folder-name :readonly)]
        (.getMessageCount folder))))
 
-(defn user-flags [message]
-  (let [flags (flags message)]
-    (.getUserFlags flags)))
+(defn all-messages
+  "Given a store and folder returns all messages
+   reversed so the newest messages come first"
+  ([folder-name] (all-messages *store* folder-name))
+  ([^com.sun.mail.imap.IMAPStore store folder-name]
+     (let [folder (open-folder folder-name :readonly)]
+       (->> (.getMessages folder)
+            reverse))))
 
 (defn unread-messages
   "Find unread messages"
