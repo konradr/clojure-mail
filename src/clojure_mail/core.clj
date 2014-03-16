@@ -300,13 +300,24 @@
                (folders store %)))
       (.list f))))
 
+(def folder-permissions
+  {:readonly Folder/READ_ONLY
+   :readwrite Folder/READ_WRITE})
+
+(defn open-folder
+  ([folder-name perm-level] (open-folder *store* folder-name perm-level))
+  ([store folder-name perm-level]
+     (let [folder (get gmail-folder-names folder-name)
+           root-folder (.getDefaultFolder store)
+           found-folder (get-folder root-folder folder)]
+       (doto found-folder (.open (get folder-permissions perm-level))))))
+
 (defn message-count
   "Returns the number of messages in a folder"
-  ([folder] (message-count *store*))
-  ([store folder]
-     (let [fd (doto (.getFolder store folder)
-                (.open Folder/READ_ONLY))]
-       (.getMessageCount fd))))
+  ([folder-name] (message-count *store* folder-name))
+  ([store folder-name]
+     (let [folder (open-folder folder-name :readonly)]
+       (.getMessageCount folder))))
 
 (defn user-flags [message]
   (let [flags (flags message)]
@@ -316,10 +327,7 @@
   "Find unread messages"
   ([folder-name] (unread-messages *store* folder-name))
   ([^com.sun.mail.imap.IMAPStore store folder-name]
-     (let [folder (get gmail-folder-names folder-name)
-           root-folder (.getDefaultFolder store)
-           inbox (.getFolder root-folder folder)
-           folder (doto inbox (.open Folder/READ_ONLY))]
+     (let [folder (open-folder folder-name :readonly)]
        (doall (map read-message
                    (.search folder
                             (FlagTerm. (Flags. Flags$Flag/SEEN) false)))))))
@@ -328,10 +336,7 @@
   "Mark all messages in folder as read"
   ([folder-name] (mark-all-read *store* folder-name))
   ([^com.sun.mail.imap.IMAPStore store folder-name]
-     (let [folder (get gmail-folder-names folder-name)
-           root-folder (.getDefaultFolder store)
-           inbox (.getFolder root-folder folder)
-           folder (doto inbox (.open Folder/READ_WRITE))
+     (let [folder (open-folder folder-name :readwrite)
            messages (.search folder (FlagTerm. (Flags. Flags$Flag/SEEN) false))]
        (doall (map #(.setFlags % (Flags. Flags$Flag/SEEN) true) messages))
        nil)))
