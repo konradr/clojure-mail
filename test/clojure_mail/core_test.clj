@@ -34,8 +34,7 @@
     (is (= (subject fixture) "Request to share ContractsBuilder"))))
 
 (deftest message-from-test
-  (testing "should return the message sender"
-    (is (= (from fixture) "niuserre@gmail.com")
+  (testing "should return the message sender"))
 
 (deftest message-content-type-test
   (testing "should return the message content-type")
