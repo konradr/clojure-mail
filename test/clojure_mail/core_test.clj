@@ -5,7 +5,7 @@
 ;; Load a fixture from disk and return a MimeMessage
 
 (defn load-fixture [fixture]
-  (file->message
+  (read-mail-from-file
     (str "test/clojure_mail/fixtures/" fixture)))
 
 (def fixture (load-fixture "25"))

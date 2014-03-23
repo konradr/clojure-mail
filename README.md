@@ -20,30 +20,29 @@ command line mail clients.
 
 ## Authentication
 
-There are two ways to authenticate. The first is to manually create a mail store session like this
+First create a mail store session like this:
 
 ```clojure
-
-(auth! "username@gmail.com" "password")
-
-(gen-store)
+(def store (gmail-store "username@gmail.com" "password"))
 ```
 
-If you just want to get something from your inbox you can also pass in your gmail credentials like this
+Then use `store` when you call other functions, like this:
 
+```clojure
+(inbox store 5)
 
+;=> ...
 ```
 
-;; Get the last 5 messages from your Gmail inbox
+You can also use the `with-store` macro to wrap your code with an open store, like this:
 
-(def messages (inbox "user@gmail.com" "password" 5))
-
-(def message-subject (:subject (first messages)))
-
-;; => "Top Stories from the last 24 hours"
-
+```clojure
+(with-store (gmail-store "username@gmail.com" "password")
+  (inbox 5))
+;=> ...
 ```
 
+Notice how we didn't have to pass `store` when we used the macro?
 
 ## Reading email messages
 

@@ -24,30 +24,21 @@
     (ref-set settings
       {:email email :pass pass})))
 
-(def gmail
-  {:protocol "imaps"
-   :server "imap.gmail.com"})
-
-(defn assert-credentials!
-  "Make sure that a user has set Gmail credentials"
-  []
-  (when (empty? @settings)
-    (let [msg "\nYou must set your Gmail credentials with (auth! email password)\n"]
-      (throw (Exception. msg)))))
-
-(defmacro with-auth [user pass & body])
-
+;; Gmail
 ;; ***********************************************
 
 (def gmail
   {:protocol "imaps"
    :server   "imap.gmail.com"})
 
-(def folder-names
+(def gmail-folder-names
   {:inbox "INBOX"
    :all   "[Gmail]/All Mail"
    :sent  "[Gmail]/Sent Mail"
    :spam  "[Gmail]/Spam"})
+
+;; Mail store
+;; *******************************************************
 
 (defn as-properties
   [m]
@@ -55,19 +46,6 @@
     (doseq [[k v] m]
       (.setProperty p (str k) (str v)))
         p))
-
-(defn file->message
-  "read a downloaded mail message in the same format
-   as you would find on the mail server. This can
-   be used to read saved messages from text files
-   and for parsing fixtures in tests etc"
-  [path-to-message]
-  (let [props (Session/getDefaultInstance (Properties.))
-        msg (FileInputStream. (File. path-to-message))]
-    (MimeMessage. props msg)))
-
-;; Mail store
-;; *******************************************************
 
 (defn store
   "A store models a message store and its access protocol,
@@ -80,48 +58,51 @@
       (catch javax.mail.AuthenticationFailedException e
         (format "Invalid credentials %s : %s" email pass)))))
 
-(defn gen-store
-  "Generates an email store which allows us access to our inbox"
-  []
-  (assert-credentials!)
-  (let [[email pass] ((juxt :email :pass) @settings)]
-    (apply (partial store (:protocol gmail) (:server gmail))
-      (vals @settings))))
+(defn gmail-store
+  "Generates an email store which allows us access to our Gmail inbox"
+  [email password]
+  (let [{:keys [protocol server]} gmail]
+    (store protocol server email password)))
+
+(defonce ^:dynamic *store* nil)
+
+(defmacro with-store
+  "Takes a store which has been connected, and binds to to *store* within the
+  scope of the form.
+
+  **Usage:**
+
+   user> (with-store (gmail-store \"username@gmail.com\" \"password\")
+           (read-messages :inbox 5))
+   ;=> "
+  [s & body]
+  `(binding [*store* ~s]
+     ~@body))
 
 (defn connected?
   "Returns true if a connection is established"
-  [^com.sun.mail.imap.IMAPStore s]
-  (.isConnected s))
+  ([] (connected? *store*))
+  ([^com.sun.mail.imap.IMAPStore s]
+     (.isConnected s)))
 
 (defn close-store
   "Close an open IMAP store connection"
-  [s]
-  (.close s))
+  ([] (close-store *store*))
+  ([s] (.close s)))
 
 (defn get-default-folder
   ^{:doc "Returns a Folder object that represents the 'root' of the default
           namespace presented to the user by the Store."}
-  [^com.sun.mail.imap.IMAPStore s]
-  (.getDefaultFolder s))
+  ([] (get-default-folder *store*))
+  ([^com.sun.mail.imap.IMAPStore s]
+     (.getDefaultFolder s)))
 
 (defn get-folder
   "Return the Folder object corresponding to the given name."
-  [^com.sun.mail.imap.IMAPStore s name]
-  (.getFolder s name))
+  ([name] (get-folder *store* name))
+  ([^com.sun.mail.imap.IMAPStore s name]
+     (.getFolder s name)))
 
-(def gmail-store
-  (let [{:keys [protocol server]} gmail]
-    (partial store protocol server)))
-
-(defn all-messages
-  "Given a store and folder returns all messages
-   reversed so the newest messages come first"
-  [^com.sun.mail.imap.IMAPStore store folder]
-  (let [s (.getDefaultFolder store)
-        inbox (.getFolder s folder)
-        folder (doto inbox (.open Folder/READ_ONLY))]
-    (->> (.getMessages folder)
-         reverse)))
 
 ;; Message parser
 ;; *********************************************************
@@ -191,6 +172,10 @@
   (let [f (flags message)]
     (boolean
       (.contains f flag))))
+
+(defn user-flags [message]
+  (let [flags (flags message)]
+    (.getUserFlags flags)))
 
 (defn read?
   "Checks if this message has been read"
@@ -299,70 +284,107 @@
       true)))
 
 (defn folders
-  "Returns a seq of all IMAP folders inlcuding sub folders"
+  "Returns a seq of all IMAP folders including sub folders"
+  ([] (folders *store* (.getDefaultFolder *store*)))
   ([store] (folders store (.getDefaultFolder store)))
   ([store f]
-  (map
-    #(cons (.getName %)
-      (if (sub-folder? %)
-        (folders store %)))
-          (.list f))))
+     (map
+      #(cons (.getName %)
+             (if (sub-folder? %)
+               (folders store %)))
+      (.list f))))
+
+(def folder-permissions
+  {:readonly Folder/READ_ONLY
+   :readwrite Folder/READ_WRITE})
+
+(defn open-folder
+  ([folder-name perm-level] (open-folder *store* folder-name perm-level))
+  ([store folder-name perm-level]
+     (let [folder (get gmail-folder-names folder-name)
+           root-folder (.getDefaultFolder store)
+           found-folder (get-folder root-folder folder)]
+       (doto found-folder (.open (get folder-permissions perm-level))))))
 
 (defn message-count
   "Returns the number of messages in a folder"
-  [store folder]
-  (let [fd (doto (.getFolder store folder)
-                 (.open Folder/READ_ONLY))]
-    (.getMessageCount fd)))
+  ([folder-name] (message-count *store* folder-name))
+  ([store folder-name]
+     (let [folder (open-folder folder-name :readonly)]
+       (.getMessageCount folder))))
 
-(defn user-flags [message]
-  (let [flags (flags message)]
-    (.getUserFlags flags)))
+(defn all-messages
+  "Given a store and folder returns all messages
+   reversed so the newest messages come first"
+  ([folder-name] (all-messages *store* folder-name))
+  ([^com.sun.mail.imap.IMAPStore store folder-name]
+     (let [folder (open-folder folder-name :readonly)]
+       (->> (.getMessages folder)
+            reverse))))
 
 (defn unread-messages
   "Find unread messages"
-  [folder-name]
-  (with-open [connection (gen-store)]
-    (let [folder (doto (.getFolder connection folder-name)
-                   (.open Folder/READ_ONLY))]
-      (doall (map read-message
-               (.search folder
-                 (FlagTerm. (Flags. Flags$Flag/SEEN) false)))))))
+  ([folder-name] (unread-messages *store* folder-name))
+  ([^com.sun.mail.imap.IMAPStore store folder-name]
+     (let [folder (open-folder folder-name :readonly)]
+       (doall (map read-message
+                   (.search folder
+                            (FlagTerm. (Flags. Flags$Flag/SEEN) false)))))))
 
 (defn mark-all-read
-  [folder-name]
-  (with-open [connection (gen-store)]
-      (let [folder (doto (.getFolder connection folder-name)
-                     (.open Folder/READ_WRITE))
-            messages (.search folder
-                       (FlagTerm. (Flags. Flags$Flag/SEEN) false))]
-         (doall (map #(.setFlags % (Flags. Flags$Flag/SEEN) true) messages))
-        nil)))
+  "Mark all messages in folder as read"
+  ([folder-name] (mark-all-read *store* folder-name))
+  ([^com.sun.mail.imap.IMAPStore store folder-name]
+     (let [folder (open-folder folder-name :readwrite)
+           messages (.search folder (FlagTerm. (Flags. Flags$Flag/SEEN) false))]
+       (doall (map #(.setFlags % (Flags. Flags$Flag/SEEN) true) messages))
+       nil)))
 
-(defn dump
+
+;; Saving / reading messages to filesystem
+;; *********************************************************
+
+(defn write-msg-to-dir
+  "Write one message to a file in dir. Filename will look like:
+
+  <e1878b88-e02e-4750-b4a4-357cbd4ad0fb@xtinp2mta143.xt.local>
+
+  These message files can be read by the read-mail-from-file function"
+  [dir msg]
+  (.writeTo msg (java.io.FileOutputStream.
+                 (format "%s%s" dir (str (message-id msg))))))
+
+(defn save-msgs-to-dir
   "Handy function that dumps out a batch of emails to disk"
   [dir msgs]
   (doseq [msg msgs]
-    (.writeTo msg (java.io.FileOutputStream.
-      (format "%s%s" dir (str (message-id msg)))))))
+    (write-msg-to-dir dir msg)))
+
+(defn read-mail-from-file
+  "read a downloaded mail message in the same format
+   as you would find on the mail server. This can
+   be used to read saved messages from text files
+   and for parsing fixtures in tests etc"
+  [path-to-message]
+  (let [props (Session/getDefaultInstance (Properties.))
+        msg (FileInputStream. (File. path-to-message))]
+    (MimeMessage. props msg)))
 
 ;; Public API
 ;; *********************************************************
 
 (defn read-messages
   "Get all messages from a users inbox"
-  ([folder-name email password limit]
-  (let [store (gmail-store email password)
-        folder (get folder-names folder-name)
-        messages (take limit (all-messages store folder))]
-        (doall
-          (map #(read-message %)
-            messages)))))
+  ([folder-name limit] (read-messages *store* folder-name limit))
+  ([store folder-name limit]
+     (let [folder (get gmail-folder-names folder-name)
+           messages (take limit (all-messages store folder))]
+       (doall
+        (map #(read-message %)
+             messages)))))
 
 (defn inbox
   "Get n messages from your inbox"
-  ([limit]
-    (let [[email password] (vals @settings)]
-      (inbox email password limit)))
-  ([email password limit]
-    (read-messages :inbox email password limit)))
+  ([limit] (inbox *store* limit))
+  ([store limit]
+    (read-messages store :inbox limit)))
