@@ -1,8 +1,12 @@
 # Clojure-mail
 
 
+This is a fork of the canonical clojure-mail repo.
+
+You can require it with:
+
 ```
-[clojure-mail "0.1.5"]
+[org.clojars.mathias/clojure-mail "0.2.0"]
 ```
 
 A clojure library for parsing, downloading and reading
