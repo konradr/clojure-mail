@@ -1,4 +1,5 @@
-(ns clojure-mail.folder)
+(ns clojure-mail.folder
+  (:import [javax.mail Flags Flags$Flag]))
 
 ;; note that the get folder fn is part of the store namespace
 
@@ -30,6 +31,13 @@
 (defn get-message [f id]
   (.getMessage f id))
 
+(defn get-uid [f m]
+  (.getUID f m))
+
+(defn delete-message [f id]
+  (let [message (get-message-by-uid f id)]
+    (.setFlag message Flags$Flag/DELETED true)))
+
 (defn get-messages
   "Gets all messages from folder f"
   [folder]
@@ -38,6 +46,6 @@
 (defn search [f query]
   (.search f query))
 
-(defn list [f]
+(defn list-folders [f]
   "List all folders under folder f"
   (.list f))
